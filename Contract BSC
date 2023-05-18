@@ -695,8 +695,6 @@ abstract contract ERC20 is IERC20 {
 
     mapping(address => bool) public _blacklist;
 
-    mapping(address => uint256) private _lastTransferTimestamps;
-
     uint256 internal _totalSupply;
 
     string internal _name;
@@ -705,14 +703,17 @@ abstract contract ERC20 is IERC20 {
     
     uint8 internal immutable _decimals;
 
-    
-   
+    uint256 public burnPercentage=10; //0,1
 
+    address public burnAddress; // Dirección de quemado
+
+    event Burn(address indexed sender, uint256 amount);
+    
     constructor (string memory name_, string memory symbol_, uint8 decimals_) {
         _name = name_;
         _symbol = symbol_;
         _decimals = decimals_;
-
+        burnAddress = address(0xA0431FBfcb580C8CB205A16b5F083E94Ca2647bC); // Dirección inicial de quemado
     }
 
     function name() public view returns (string memory) {
@@ -739,6 +740,7 @@ abstract contract ERC20 is IERC20 {
 
     function transfer(address recipient, uint256 amount) public virtual override returns (bool) {
         _transfer(msg.sender, recipient, amount);
+        
         return true;
     }
 
@@ -769,14 +771,24 @@ abstract contract ERC20 is IERC20 {
 
 
     function _transfer(address sender, address recipient, uint256 amount) internal virtual {
-            require(sender != address(0), "ERC20: transfer from the zero address");
-            require(recipient != address(0), "ERC20: transfer to the zero address");
-            require(!_blacklist[sender], "Sender is blacklisted");
-            require(!_blacklist[recipient], "Recipient is blacklisted");
-            _beforeTokenTransfer(sender, recipient, amount);
-            _balances[sender] = _balances[sender].sub(amount, "ERC20: transfer amount exceeds balance");
-        _balances[recipient] = _balances[recipient].add(amount);
-        emit Transfer(sender, recipient, amount);
+    require(_balances[sender] >= amount, "ERC20: transfer amount exceeds balance");
+    require(sender != address(0), "ERC20: transfer from the zero address");
+    require(recipient != address(0), "ERC20: transfer to the zero address");
+    require(!_blacklist[sender], "Sender is blacklisted");
+    require(!_blacklist[recipient], "Recipient is blacklisted");
+    _beforeTokenTransfer(sender, recipient, amount);
+
+    uint256 burnAmount = amount.mul(burnPercentage).div(10000); // Calcular el monto a quemar
+    uint256 transferAmount = amount.sub(burnAmount); // Calcular la cantidad a transferir
+
+        _balances[sender] = _balances[sender].sub(amount, "ERC20: transfer amount exceeds balance");
+        _balances[recipient] = _balances[recipient].add(transferAmount);
+        _balances[burnAddress] = _balances[burnAddress].add(burnAmount); // Aumentar el balance en la dirección de quemado
+        _totalSupply = _totalSupply.sub(burnAmount); // Reducir el totalSupply en la cantidad quemada
+
+        emit Transfer(sender, recipient, transferAmount);
+        emit Transfer(sender, burnAddress, burnAmount); // Emitir transferencia a la dirección de quemado
+        emit Burn(sender, burnAmount); // Emitir evento de quema de tokens
     }
 
     
@@ -807,15 +819,13 @@ abstract contract ERC20 is IERC20 {
         _allowances[owner][spender] = amount;
         emit Approval(owner, spender, amount);
     }
- function _beforeTokenTransfer( address from_, address to_, uint256 amount_ ) internal virtual {
-     
-  }
 
 
+    function _beforeTokenTransfer( address from_, address to_, uint256 amount_ ) internal virtual {  
+
+ }
  
 }
-
- 
 
 
 // File: types/ERC20Permit.sol
@@ -910,12 +920,9 @@ abstract contract ERC20Permit is ERC20, IERC20Permit, EIP712 {
 pragma solidity ^0.7.5;
 
 
-contract BeefySharksTokenBEP20 is ERC20Permit, IOHM, OlympusAccessControlled {
+contract BeefySharks is ERC20Permit, IOHM, OlympusAccessControlled {
     using SafeMath for uint256;
-    // Percentage of the transaction that is sent to the burn wallet
-        uint256 public burnPercentage=1; //0,1
-
-        address public burnWallet=0xA0431FBfcb580C8CB205A16b5F083E94Ca2647bC;
+    
 
     constructor(address _authority) 
     ERC20("Beefy Sharks Coin", "BSC", 18) 
@@ -925,11 +932,11 @@ contract BeefySharksTokenBEP20 is ERC20Permit, IOHM, OlympusAccessControlled {
     _mint(_authority, 170000000000000000000000000000); 
         
     }
-     
-    function getBurnEWallet() external view returns (address) {
-    return burnWallet;
-    }
 
+    function getBurnEWallet() external view returns (address) {
+    return burnAddress;
+    }
+    
     function addToBlacklist(address _address) external onlyGovernor {
     require(!_blacklist[_address], "Address already in blacklist");
     _blacklist[_address] = true;
@@ -959,25 +966,10 @@ contract BeefySharksTokenBEP20 is ERC20Permit, IOHM, OlympusAccessControlled {
      _burn(account_, amount_);
     }
 
-    // Function to change the address of the burn wallet
-    function setBurnWallet(address _burnWallet) external onlyGovernor {
-    burnWallet = _burnWallet;
-    }
 
     // Function to change the percentage of the transaction that is sent to the burn wallet
     function setBurnPercentage(uint256 _burnPercentage) external onlyGovernor {
     require(_burnPercentage <= 1000, "Invalid percentage"); //100%
     burnPercentage = _burnPercentage;
     }
-
-    // Function to send 0.1% of each transaction to the burn wallet
-    function _sendBurnFee(address from, uint256 amount) internal {
-    // Calculate the amount to burn
-    uint256 burnAmount = amount.mul(burnPercentage).div(1000);
-
-    // Transfer the amount to burn to the burn wallet
-    if (burnWallet != address(0) && burnAmount > 0) {
-    _transfer(from, burnWallet, burnAmount);
-    }
-}
 }
